@@ -1,0 +1,135 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: test-quarkus-project-push-pipeline-run
+  annotations:
+    # The event we are targeting as seen from the webhook payload
+    # this can be an array too, i.e: [pull_request, push]
+    pipelinesascode.tekton.dev/on-event: "[push]"
+
+    # The branch or tag we are targeting (ie: main, refs/tags/*)
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+
+    # Fetch the git-clone task from hub, we are able to reference later on it
+    # with taskRef and it will automatically be embedded into our pipeline.
+    pipelinesascode.tekton.dev/task: "[git-clone, maven, buildah]"
+
+    # You can add more tasks by increasing the suffix number, you can specify
+    # them as array to have multiple of them.
+    # browse the tasks you want to include from hub on https://hub.tekton.dev/
+    #
+    # pipelinesascode.tekton.dev/task-2: "[curl, buildah]"
+
+    # How many runs we want to keep attached to this event
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+spec:
+  params:
+    # The variable with brackets are special to Pipelines as Code
+    # They will automatically be expanded with the events from Github.
+    - name: repo_url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  pipelineSpec:
+    params:
+      - name: repo_url
+      - name: revision
+    workspaces:
+      - name: source
+      - name: dockerconfig-ws
+        optional: true
+    tasks:
+      - name: fetch-repository
+        taskRef:
+          name: git-clone
+          kind: ClusterTask
+        workspaces:
+          - name: output
+            workspace: source
+        params:
+          - name: url
+            value: $(params.repo_url)
+          - name: revision
+            value: $(params.revision)
+      - name: maven
+        taskRef:
+          name: maven
+          kind: ClusterTask
+        runAfter:
+          - fetch-repository
+        params:
+          - name: GOALS
+            value:
+              - -B
+              - package
+          - name: MAVEN_IMAGE
+            value: registry.access.redhat.com/ubi8/openjdk-17@sha256:79585ca02551ecff9d368905d7ce387232b9fd328256e7a715ae3c4ec7b086d3
+        workspaces:
+          - name: source
+            workspace: source
+          - name: maven-settings
+            workspace: maven-settings
+      - name: build-container-image
+        runAfter:
+          - maven
+        taskRef:
+          kind: ClusterTask
+          name: buildah
+        params:
+          - name: BUILDER_IMAGE
+            value: >-
+              registry.redhat.io/rhel8/buildah@sha256:ac0b8714cc260c94435cab46fe41b3de0ccbc3d93e38c395fa9d52ac49e521fe
+          - name: STORAGE_DRIVER
+            value: vfs
+          - name: DOCKERFILE
+            value: ./src/main/docker/Dockerfile.jvm
+          - name: CONTEXT
+            value: .
+          - name: TLSVERIFY
+            value: 'false'
+          - name: FORMAT
+            value: oci
+          - name: SKIP_PUSH
+            value: 'false'
+          - name: IMAGE
+            value: "quay.io/jmayorgarh/test-quarkus-project:{{revision}}"
+        workspaces:
+          - name: source
+            workspace: source
+          - name: dockerconfig
+            workspace: dockerconfig-ws
+      - name: kustomize
+        runAfter: [build-container-image]
+        workspaces:
+          - name: source
+            workspace: source
+        taskSpec:
+          workspaces:
+            - description: Source
+              name: source
+          steps:
+            - name: update-digest
+              workingDir: $(workspaces.source.path)
+              image: quay.io/wpernath/kustomize-ubi@sha256:6d5d5a3dfdda58723077a0d78d1f4e353b12ad3115d21a11de304bd073c2401b
+              script: |
+                kustomize version
+  workspaces:
+    - name: maven-settings
+      emptyDir: {}
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    - name: dockerconfig-ws
+      secret:
+        secretName: pipelines-pull-secret
+    # This workspace will inject secret to help the git-clone task to be able to
+    # checkout the private repositories
+    #- name: basic-auth
+    #  secret:
+    #    secretName: "{{ git_auth_secret }}"

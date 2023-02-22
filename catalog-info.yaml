@@ -1,0 +1,24 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: "test-quarkus-project"
+  description: "Test Quarkus Project"
+  tags:
+    - java
+    - quarkus
+  links:
+    - url: https://devspaces.apps.cluster-ts7vl.ts7vl.sandbox1284.opentlc.com/#https://github.com/rh-janus/test-quarkus-project?devfilePath=.devfile.yaml
+      title: Open in OpenShift DevSpaces
+      icon: web
+  annotations:
+    'github.com/project-slug': rh-janus/test-quarkus-project
+    'backstage.io/kubernetes-id': test-quarkus-project
+    'backstage.io/techdocs-ref': dir:.
+    'sonarqube.org/project-key': rh-janus_test-quarkus-project
+    'prometheus.io/alert': ErrorBudgetBurn-critical--prod-test-quarkus-project,ErrorBudgetBurn-warning--prod-test-quarkus-project
+    'prometheus.io/rule': virtual_service:_prod_test-quarkus-project:error_rate_1d,virtual_service:_prod_test-quarkus-project:error_rate_1h,virtual_service:_prod_test-quarkus-project:error_rate_2h,virtual_service:_prod_test-quarkus-project:error_rate_30m
+spec:
+  type: service
+  lifecycle: experimental
+  owner: "acme-corp"
+  system: thing-a-ma-5g
